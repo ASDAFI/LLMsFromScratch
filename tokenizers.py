@@ -39,11 +39,13 @@ class BytePairEncoding:
             dataset_tokens = new_dataset_tokens.copy()
 
     @staticmethod
-    def _merge(dataset_tokens: list[str], max_pair: tuple[str, str], latest_token: int):
+    def _merge(dataset_tokens: list[str], max_pair: tuple[int, int], latest_token: int):
         new_dataset_tokens = []
         idx = 0
-        while idx < len(dataset_tokens) - 1:
-            if (dataset_tokens[idx], dataset_tokens[idx + 1]) == max_pair:
+        count_tokens = len(dataset_tokens)
+
+        while idx < count_tokens:
+            if idx < count_tokens - 1 and (dataset_tokens[idx], dataset_tokens[idx + 1]) == max_pair:
                 new_dataset_tokens.append(latest_token)
                 idx += 2
             else:
@@ -59,16 +61,52 @@ class BytePairEncoding:
             pair_map_count[pair] += 1
         return pair_map_count
 
+    def add_token(self, token: str):
+        idx = self.token_mapping[token[0]]
+        count_current_tokens = len(self.token_mapping)
+
+        for i in range(1, len(token)):
+            new_idx = self.token_mapping[token[i]]
+            if (idx, new_idx) not in self.merges.keys():
+                self.merges[(idx, new_idx)] = count_current_tokens
+                self.token_mapping[
+                    self.reverse_token_mapping[idx] + self.reverse_token_mapping[new_idx]] = count_current_tokens
+                self.reverse_token_mapping[count_current_tokens] = self.reverse_token_mapping[idx] + \
+                                                                   self.reverse_token_mapping[new_idx]
+
+                idx = count_current_tokens
+                count_current_tokens += 1
+            else:
+                idx = self.merges[(idx, new_idx)]
+
+    def add_token_after_load(self, token: str):
+        codes = self.tokenize(token)
+        count_current_tokens = len(self.token_mapping)
+
+        idx = codes[0]
+
+        for i in range(1, len(codes)):
+            new_idx = codes[i]
+            self.merges[(idx, new_idx)] = count_current_tokens
+            self.token_mapping[
+                self.reverse_token_mapping[idx] + self.reverse_token_mapping[new_idx]] = count_current_tokens
+            self.reverse_token_mapping[count_current_tokens] = self.reverse_token_mapping[idx] + \
+                                                               self.reverse_token_mapping[new_idx]
+
+            idx = count_current_tokens
+            count_current_tokens += 1
+
+
     def tokenize(self, text: str) -> list[int]:
         text_tokens = list(map(int, text.encode('utf-8')))
         while True:
             pair_map_count = self._get_pair_map_count(text_tokens)
-
-            min_pair = max(pair_map_count, key=lambda p: self.merges.get(p, float('inf')))
+            if not pair_map_count:
+                break
+            min_pair = min(pair_map_count, key=lambda p: self.merges.get(p, float('inf')))
             if min_pair not in self.merges:
                 break
             text_tokens = self._merge(text_tokens, min_pair, self.merges[min_pair]).copy()
-
         return text_tokens
 
     def detokenize(self, arr: list[int]) -> str:
@@ -103,4 +141,3 @@ class BytePairEncoding:
             write_merges = json.load(file)
             for k, val in write_merges.items():
                 self.merges[tuple(map(int, k.split(',')))] = val
-
